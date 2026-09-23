@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+
+# Downloaded reports and generated indexes are reproducible and too large for Git.
+data/raw/
+data/parsed/
+data/index/
+data/cache/
+tmp/
+.ppt_review/
+
+# Local logs and runtime files.
+*.log
+server.pid
+
