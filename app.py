@@ -42,6 +42,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self) -> None:
+        if urlparse(self.path).path == "/api/save-screenshot":
+            size = int(self.headers.get("Content-Length", "0"))
+            payload = self.rfile.read(size)
+            target = ROOT / "screenshots" / "qa_result.png"
+            target.write_bytes(payload)
+            self.send_json({"saved": str(target)})
+            return
         if urlparse(self.path).path != "/api/ask":
             self.send_error(404)
             return
@@ -73,4 +80,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
