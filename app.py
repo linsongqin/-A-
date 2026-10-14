@@ -12,6 +12,7 @@ from src.qa import answer_question
 
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
+EVALUATION_PATH = ROOT / "evaluation" / "results.csv"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,6 +30,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/status":
             self.send_json({"ok": True, "corpus": "12家白酒公司·2025年报", "retrieval": "Vector + BM25 + RRF"})
+            return
+        if path == "/api/evaluation":
+            import csv
+
+            if not EVALUATION_PATH.exists():
+                self.send_json({"error": "评测记录尚未生成"}, 404)
+                return
+            with EVALUATION_PATH.open(encoding="utf-8-sig", newline="") as handle:
+                self.send_json({"questions": list(csv.DictReader(handle))})
             return
         requested = WEB_DIR / ("index.html" if path == "/" else path.lstrip("/"))
         if not requested.exists() or not requested.is_file() or WEB_DIR not in requested.resolve().parents:

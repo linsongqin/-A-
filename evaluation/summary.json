@@ -1,0 +1,22 @@
+{
+  "question_count": 10,
+  "unique_ids": 10,
+  "type_counts": {
+    "数值定位": 5,
+    "表格/分产品": 1,
+    "定性风险": 1,
+    "原因解释": 1,
+    "跨公司全景": 2
+  },
+  "retrieval_full_hit": 10,
+  "retrieval_partial_or_miss": 0,
+  "answer_judgement_counts": {
+    "部分正确": 7,
+    "正确": 3
+  },
+  "citation_count": 10,
+  "cross_company_ids": [
+    "Q09",
+    "Q10"
+  ]
+}

@@ -15,6 +15,106 @@ def evidence_label(row: dict) -> str:
     return f"{row['company']}｜{row['report_year']}年年报｜{row['section']}｜第{row['page']}页"
 
 
+def _ranking_row(row: dict, rank_key: str, score_key: str) -> dict:
+    """Return the compact row used by the page's two-channel ranking view."""
+    return {
+        "rank": row.get(rank_key),
+        "score": round(float(row.get(score_key) or 0.0), 6),
+        "company": row["company"],
+        "section": row["section"],
+        "page": row["page"],
+        "content_type": row["content_type"],
+        "chunk_id": row["chunk_id"],
+    }
+
+
+def _rankings(evidence: list[dict]) -> dict[str, list[dict]]:
+    """Expose Vector and BM25 rankings separately instead of hiding them in RRF."""
+    vector = sorted(
+        (row for row in evidence if row.get("vector_rank") is not None),
+        key=lambda row: (row["vector_rank"], -float(row.get("vector_score") or 0.0)),
+    )
+    bm25 = sorted(
+        (row for row in evidence if row.get("bm25_rank") is not None),
+        key=lambda row: (row["bm25_rank"], -float(row.get("bm25_score") or 0.0)),
+    )
+    return {
+        "vector": [_ranking_row(row, "vector_rank", "vector_score") for row in vector],
+        "bm25": [_ranking_row(row, "bm25_rank", "bm25_score") for row in bm25],
+    }
+
+
+def _signal_terms(question: str) -> list[str]:
+    """Map a question to the evidence labels that must be present in its answer."""
+    terms: list[str] = []
+    if "营业总收入" in question:
+        terms.append("营业总收入")
+    if "营业收入" in question:
+        terms.append("营业收入")
+    if "净利润" in question:
+        terms.append("净利润")
+    if "现金流" in question:
+        terms.append("经营活动产生的现金流量净额")
+    if "合同负债" in question:
+        terms.append("合同负债")
+    if "研发投入" in question:
+        terms.append("研发投入")
+    if "风险" in question:
+        terms.append("可能面对的风险")
+    if "变动" in question and "原因" in question:
+        terms.append("变动原因说明")
+    return list(dict.fromkeys(terms))
+
+
+def _coverage(question: str, evidence: list[dict], companies: list[str]) -> tuple[list[dict], list[str]]:
+    """Check evidence coverage by company and report missing material explicitly."""
+    terms = _signal_terms(question)
+    coverage: list[dict] = []
+    missing: list[str] = []
+    for company in companies:
+        rows = [row for row in evidence if row["company"] == company]
+        text = "\n".join(row["text"] for row in rows)
+        compact_text = "".join(text.split())
+        matched = [term for term in terms if "".join(term.split()) in compact_text]
+        pages = sorted({int(row["page"]) for row in rows})
+        if not rows:
+            status = "缺材料"
+            note = f"{company}：没有召回可核验片段"
+            missing.append(note)
+        elif terms and len(matched) < len(terms):
+            status = "部分覆盖"
+            absent = "、".join(term for term in terms if term not in matched)
+            note = f"{company}：未检索到{absent}"
+            missing.append(note)
+        else:
+            status = "已覆盖"
+            note = ""
+        coverage.append(
+            {
+                "company": company,
+                "status": status,
+                "evidence_count": len(rows),
+                "pages": pages,
+                "matched_terms": matched,
+                "note": note,
+            }
+        )
+    if not companies:
+        coverage.append(
+            {
+                "company": "全库",
+                "status": "未指定公司",
+                "evidence_count": len(evidence),
+                "pages": sorted({int(row["page"]) for row in evidence}),
+                "matched_terms": [term for term in terms if "".join(term.split()) in "".join("\n".join(row["text"] for row in evidence).split())],
+                "note": "问题未点名公司，结果按全库检索；请人工核对口径。",
+            }
+        )
+    if not missing:
+        missing = ["未发现材料缺口；全景题已按公司分别取证。"]
+    return coverage, missing
+
+
 def sentence_candidates(text: str) -> list[str]:
     parts = re.split(r"(?<=[。；！？])|\n", normalize_space(text))
     return [part.strip() for part in parts if len(part.strip()) >= 12]
@@ -125,7 +225,8 @@ def llm_answer(question: str, evidence: list[dict]) -> str | None:
 
 
 def answer_question(question: str, top_k: int = 8, company: str | None = None) -> dict[str, Any]:
-    evidence = get_retriever().search(question, top_k=top_k, company=company)
+    retriever = get_retriever()
+    evidence = retriever.search(question, top_k=top_k, company=company)
     try:
         answer = llm_answer(question, evidence)
         mode = "LLM 生成"
@@ -154,4 +255,14 @@ def answer_question(question: str, top_k: int = 8, company: str | None = None) -
                 "fusion_score": round(row.get("fusion_score", 0.0), 6),
             }
         )
-    return {"question": question, "answer": answer, "mode": mode, "sources": sources}
+    named_companies = [company] if company else retriever.companies_in_query(question)
+    coverage, missing_material = _coverage(question, evidence, named_companies)
+    return {
+        "question": question,
+        "answer": answer,
+        "mode": mode,
+        "sources": sources,
+        "rankings": _rankings(evidence),
+        "coverage": coverage,
+        "missing_material": missing_material,
+    }
